@@ -27,11 +27,12 @@ class BotController:
         self.telegram_token = os.environ.get("TELEGRAM_TOKEN")
         self.chat_id = os.environ.get("CHAT_ID")
         self.browserless_token = os.environ.get("BROWSERLESS_TOKEN")
+
+        # --- CAMBIO 1: Se añade el parámetro &stealth a la URL ---
         self.browserless_url = (
-            f"wss://chrome.browserless.io?token={self.browserless_token}"
+            f"wss://chrome.browserless.io?token={self.browserless_token}&stealth"
         )
-        # --- CAMBIO 1: Se añade la variable de timeout ---
-        self.INTERACTIVE_CAM_TIMEOUT = 180  # Timeout en segundos (3 minutos)
+        self.INTERACTIVE_CAM_TIMEOUT = 180
 
         if not all([self.telegram_token, self.chat_id, self.browserless_token]):
             logging.error(
@@ -186,7 +187,10 @@ class BotController:
                 {"waitUntil": "networkidle2", "timeout": 60000},
             )
             await page.waitForSelector(".play-wrapper", {"timeout": 25000})
-            await page.click(".play-wrapper")
+
+            # --- CAMBIO 2: Se usa un método de clic más robusto ---
+            await page.evaluate('document.querySelector(".play-wrapper").click()')
+
             await asyncio.sleep(30)
             await page.waitForSelector("button[data-fullscreen]", {"timeout": 10000})
             await page.click("button[data-fullscreen]")
@@ -212,7 +216,6 @@ class BotController:
             result = None
             if camera.get("type") == "interactive":
                 try:
-                    # --- CAMBIO 2: Se usa la nueva variable para el timeout ---
                     result = await asyncio.wait_for(
                         self.get_interactive_webcam_image(camera),
                         timeout=self.INTERACTIVE_CAM_TIMEOUT,
