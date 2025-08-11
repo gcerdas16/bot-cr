@@ -28,9 +28,9 @@ class BotController:
         self.chat_id = os.environ.get("CHAT_ID")
         self.browserless_token = os.environ.get("BROWSERLESS_TOKEN")
 
-        # --- CAMBIO: Se quita el &stealth para probar una conexión más simple ---
+        # --- CAMBIO: Usar conexión HTTP (CDP) que es más robusta en entornos de nube ---
         self.browserless_url = (
-            f"wss://production-sfo.browserless.io?token={self.browserless_token}"
+            f"https://chrome.browserless.io?token={self.browserless_token}"
         )
 
         self.INTERACTIVE_CAM_TIMEOUT = 240  # 4 minutos de timeout
@@ -61,42 +61,42 @@ class BotController:
                 "page_url": "https://www.ovsicori.una.ac.cr/index.php/vulcanologia/camara-volcanes-2/camara-v-turrialba",
                 "base_url": "https://www.ovsicori.una.ac.cr",
                 "image_id": "camara",
-                "type": "image",
+                "type": "interactive_simple",  # <-- CAMBIO
             },
             {
                 "name": "Volcan Irazu",
                 "page_url": "https://www.ovsicori.una.ac.cr/index.php/vulcanologia/camara-volcanes-2/camara-2-v-turrialba",
                 "base_url": "https://www.ovsicori.una.ac.cr",
                 "image_id": "camara",
-                "type": "image",
+                "type": "interactive_simple",  # <-- CAMBIO
             },
             {
                 "name": "Poas Crater",
                 "page_url": "https://www.ovsicori.una.ac.cr/index.php/vulcanologia/camara-volcanes-2/camara-crater-v-poas",
                 "base_url": "https://www.ovsicori.una.ac.cr",
                 "image_id": "camara",
-                "type": "image",
+                "type": "image",  # Esta usualmente funciona bien, la dejamos estática
             },
             {
                 "name": "Poas SO del Crater",
                 "page_url": "https://www.ovsicori.una.ac.cr/index.php/vulcanologia/camara-volcanes-2/camara-v-poas-so-del-crater",
                 "base_url": "https://www.ovsicori.una.ac.cr",
                 "image_id": "camara",
-                "type": "image",
+                "type": "interactive_simple",  # <-- CAMBIO
             },
             {
                 "name": "Poas Chahuites",
                 "page_url": "https://www.ovsicori.una.ac.cr/index.php/vulcanologia/camara-volcanes-2/camara-v-poas-chahuites",
                 "base_url": "https://www.ovsicori.una.ac.cr",
                 "image_id": "camara",
-                "type": "image",
+                "type": "image",  # Esta usualmente funciona bien, la dejamos estática
             },
             {
                 "name": "Rincon de la Vieja Sensoria",
                 "page_url": "https://www.ovsicori.una.ac.cr/index.php/vulcanologia/camara-volcanes-2/rincon-de-la-vieja-sensoria2",
                 "base_url": "https://www.ovsicori.una.ac.cr",
                 "image_id": "camara",
-                "type": "image",
+                "type": "interactive_simple",  # <-- CAMBIO
             },
             {
                 "name": "Rincon de la Vieja Curubande",
@@ -175,13 +175,60 @@ class BotController:
             logging.error(f"Error con la cámara '{cam_name}': {e}", exc_info=True)
         return None
 
+    # --- NUEVA FUNCIÓN para cámaras dinámicas simples (OVSICORI) ---
+    async def get_simple_interactive_image(self, camera_config):
+        cam_name = camera_config["name"]
+        logging.info(f"📸 Procesando cámara dinámica simple con Playwright: {cam_name}")
+        async with async_playwright() as p:
+            browser = None
+            try:
+                browser = await p.chromium.connect_over_cdp(
+                    self.browserless_url, timeout=120000
+                )
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
+                )
+                page = await context.new_page()
+                await page.goto(
+                    camera_config["page_url"],
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+
+                image_selector = f"img#{camera_config['image_id']}"
+                await page.wait_for_selector(
+                    image_selector, state="visible", timeout=30000
+                )
+
+                element = page.locator(image_selector)
+
+                filename = f"{cam_name.replace(' ', '_').lower()}.png"
+                path = os.path.join(self.WEBCAM_OUTPUT_FOLDER, filename)
+
+                await element.screenshot(path=path)
+
+                logging.info(f"Captura simple '{cam_name}' guardada.")
+                return (path, cam_name)
+            except Exception as e:
+                logging.error(
+                    f"Error con la cámara dinámica simple '{cam_name}': {e}",
+                    exc_info=True,
+                )
+                return None
+            finally:
+                if browser:
+                    await browser.close()
+
     async def get_interactive_webcam_image(self, camera_config):
         cam_name = camera_config["name"]
         logging.info(f"🤖 Procesando cámara interactiva con Playwright: {cam_name}")
         async with async_playwright() as p:
             browser = None
             try:
-                browser = await p.chromium.connect(self.browserless_url, timeout=60000)
+                # --- CAMBIO: Usar connect_over_cdp y aumentar timeout ---
+                browser = await p.chromium.connect_over_cdp(
+                    self.browserless_url, timeout=120000
+                )
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
                     viewport={"width": 1920, "height": 1080},
@@ -193,12 +240,9 @@ class BotController:
                 )
                 await page.wait_for_selector(".play-wrapper", timeout=25000)
                 await page.evaluate('document.querySelector(".play-wrapper").click()')
-
                 await asyncio.sleep(30)
-
                 await page.wait_for_selector("button[data-fullscreen]", timeout=10000)
                 await page.click("button[data-fullscreen]")
-
                 await asyncio.sleep(3)
 
                 filename = f"{cam_name.replace(' ', '_').lower()}.png"
@@ -216,24 +260,45 @@ class BotController:
                 if browser:
                     await browser.close()
 
+    # --- FUNCIÓN ACTUALIZADA para procesar todas las cámaras en paralelo ---
     async def get_all_webcam_images(self):
         logging.info("Iniciando descarga de imágenes de webcams.")
         image_data = []
+
+        tasks = []
         for camera in self.cam_config:
-            result = None
-            if camera.get("type") == "interactive":
-                try:
-                    result = await asyncio.wait_for(
-                        self.get_interactive_webcam_image(camera),
-                        timeout=self.INTERACTIVE_CAM_TIMEOUT,
+            try:
+                if camera.get("type") == "interactive":
+                    tasks.append(
+                        asyncio.wait_for(
+                            self.get_interactive_webcam_image(camera),
+                            timeout=self.INTERACTIVE_CAM_TIMEOUT,
+                        )
                     )
-                except asyncio.TimeoutError:
-                    logging.error(f"Timeout en captura de '{camera['name']}'.")
-            else:
-                result = self.get_static_webcam_image(camera)
-            if result:
-                image_data.append(result)
-            await asyncio.sleep(1)
+                elif camera.get("type") == "interactive_simple":
+                    tasks.append(
+                        asyncio.wait_for(
+                            self.get_simple_interactive_image(camera),
+                            timeout=self.INTERACTIVE_CAM_TIMEOUT,
+                        )
+                    )
+                else:
+                    tasks.append(
+                        asyncio.to_thread(self.get_static_webcam_image, camera)
+                    )
+            except Exception as e:
+                logging.error(f"Error al crear tarea para {camera['name']}: {e}")
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for i, res in enumerate(results):
+            if i < len(self.cam_config):
+                cam_name = self.cam_config[i]["name"]
+                if isinstance(res, Exception):
+                    logging.error(f"Falló la tarea para la cámara '{cam_name}': {res}")
+                elif res:
+                    image_data.append(res)
+
         return image_data
 
     async def generate_and_send_satellite_videos(self, bot):
@@ -241,7 +306,10 @@ class BotController:
         async with async_playwright() as p:
             browser = None
             try:
-                browser = await p.chromium.connect(self.browserless_url, timeout=60000)
+                # --- CAMBIO: Usar connect_over_cdp y aumentar timeout ---
+                browser = await p.chromium.connect_over_cdp(
+                    self.browserless_url, timeout=120000
+                )
                 context = await browser.new_context()
                 page = await context.new_page()
 
@@ -259,12 +327,10 @@ class BotController:
                     await page.wait_for_selector(
                         "#downloadLoop", state="visible", timeout=90000
                     )
-
                     await asyncio.sleep(5)
                     await page.evaluate(
                         'document.querySelector("#downloadLoop").click()'
                     )
-
                     img_locator = page.locator("#animatedGifWrapper img")
                     await img_locator.wait_for(state="visible", timeout=120000)
                     data_url = await img_locator.get_attribute("src")
@@ -353,6 +419,7 @@ class BotController:
                 chat_id=self.chat_id, text=text_message, parse_mode="Markdown"
             )
             logging.info("Mensaje de texto (METAR) enviado.")
+
             media_group = [
                 telegram.InputMediaPhoto(open(path, "rb"), caption=name)
                 for path, name in image_data
@@ -397,12 +464,17 @@ class BotController:
             if os.path.exists(folder):
                 shutil.rmtree(folder)
             os.makedirs(folder)
+
         bot = telegram.Bot(token=self.telegram_token)
+
         metar_task = asyncio.to_thread(self.get_metar_reports)
         webcam_task = self.get_all_webcam_images()
+
         metar_report, image_data = await asyncio.gather(metar_task, webcam_task)
+
         await self.send_report_to_telegram(bot, metar_report, image_data)
         await self.generate_and_send_satellite_videos(bot)
+
         end_time = time.time()
         logging.info(f"🎉 PROCESO COMPLETADO en {end_time - start_time:.2f} segundos.")
         logging.info("================ EJECUCIÓN FINALIZADA ================")
