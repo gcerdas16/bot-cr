@@ -28,7 +28,7 @@ class BotController:
         self.chat_id = os.environ.get("CHAT_ID")
         self.browserless_token = os.environ.get("BROWSERLESS_TOKEN")
 
-        # --- CAMBIO: Se usa la nueva URL de Browserless ---
+        # --- CAMBIO: Se quita el &stealth para probar una conexión más simple ---
         self.browserless_url = (
             f"wss://production-sfo.browserless.io?token={self.browserless_token}"
         )
