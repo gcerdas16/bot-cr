@@ -27,8 +27,6 @@ class BotController:
         self.telegram_token = os.environ.get("TELEGRAM_TOKEN")
         self.chat_id = os.environ.get("CHAT_ID")
         self.browserless_token = os.environ.get("BROWSERLESS_TOKEN")
-
-        # --- CAMBIO 1: Se añade el parámetro &stealth a la URL ---
         self.browserless_url = (
             f"wss://chrome.browserless.io?token={self.browserless_token}&stealth"
         )
@@ -181,16 +179,19 @@ class BotController:
         try:
             browser = await connect(browserWSEndpoint=self.browserless_url)
             page = await browser.newPage()
+
+            # --- NUEVO AJUSTE: Se establece un User-Agent de un navegador real ---
+            await page.setUserAgent(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
+            )
+
             await page.setViewport({"width": 1920, "height": 1080})
             await page.goto(
                 camera_config["page_url"],
                 {"waitUntil": "networkidle2", "timeout": 60000},
             )
             await page.waitForSelector(".play-wrapper", {"timeout": 25000})
-
-            # --- CAMBIO 2: Se usa un método de clic más robusto ---
             await page.evaluate('document.querySelector(".play-wrapper").click()')
-
             await asyncio.sleep(30)
             await page.waitForSelector("button[data-fullscreen]", {"timeout": 10000})
             await page.click("button[data-fullscreen]")
