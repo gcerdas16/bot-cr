@@ -30,6 +30,8 @@ class BotController:
         self.browserless_url = (
             f"wss://chrome.browserless.io?token={self.browserless_token}"
         )
+        # --- CAMBIO 1: Se añade la variable de timeout ---
+        self.INTERACTIVE_CAM_TIMEOUT = 180  # Timeout en segundos (3 minutos)
 
         if not all([self.telegram_token, self.chat_id, self.browserless_token]):
             logging.error(
@@ -210,8 +212,10 @@ class BotController:
             result = None
             if camera.get("type") == "interactive":
                 try:
+                    # --- CAMBIO 2: Se usa la nueva variable para el timeout ---
                     result = await asyncio.wait_for(
-                        self.get_interactive_webcam_image(camera), timeout=120
+                        self.get_interactive_webcam_image(camera),
+                        timeout=self.INTERACTIVE_CAM_TIMEOUT,
                     )
                 except asyncio.TimeoutError:
                     logging.error(f"Timeout en captura de '{camera['name']}'.")
