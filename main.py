@@ -13,7 +13,7 @@ from urllib.parse import urljoin
 import requests
 import telegram
 from bs4 import BeautifulSoup
-from pyppeteer import connect
+from playwright.async_api import async_playwright
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,10 +27,13 @@ class BotController:
         self.telegram_token = os.environ.get("TELEGRAM_TOKEN")
         self.chat_id = os.environ.get("CHAT_ID")
         self.browserless_token = os.environ.get("BROWSERLESS_TOKEN")
+
+        # URL de conexión para Playwright en Browserless
         self.browserless_url = (
-            f"wss://chrome.browserless.io?token={self.browserless_token}&stealth"
+            f"wss://chrome.browserless.io/playwright?token={self.browserless_token}"
         )
-        self.INTERACTIVE_CAM_TIMEOUT = 180
+
+        self.INTERACTIVE_CAM_TIMEOUT = 240  # 4 minutos de timeout
 
         if not all([self.telegram_token, self.chat_id, self.browserless_token]):
             logging.error(
@@ -147,6 +150,7 @@ class BotController:
         }
 
     def get_static_webcam_image(self, camera_config):
+        # Esta función no cambia
         cam_name = camera_config["name"]
         try:
             logging.info(f"📡 Procesando cámara estática: {cam_name}")
@@ -174,43 +178,47 @@ class BotController:
 
     async def get_interactive_webcam_image(self, camera_config):
         cam_name = camera_config["name"]
-        logging.info(f"🤖 Procesando cámara interactiva: {cam_name}")
-        browser = None
-        try:
-            browser = await connect(browserWSEndpoint=self.browserless_url)
-            page = await browser.newPage()
+        logging.info(f"🤖 Procesando cámara interactiva con Playwright: {cam_name}")
+        async with async_playwright() as p:
+            browser = None
+            try:
+                browser = await p.chromium.connect(self.browserless_url)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = await context.new_page()
 
-            # --- NUEVO AJUSTE: Se establece un User-Agent de un navegador real ---
-            await page.setUserAgent(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
-            )
+                await page.goto(
+                    camera_config["page_url"], wait_until="networkidle", timeout=60000
+                )
+                await page.wait_for_selector(".play-wrapper", timeout=25000)
+                await page.evaluate('document.querySelector(".play-wrapper").click()')
 
-            await page.setViewport({"width": 1920, "height": 1080})
-            await page.goto(
-                camera_config["page_url"],
-                {"waitUntil": "networkidle2", "timeout": 60000},
-            )
-            await page.waitForSelector(".play-wrapper", {"timeout": 25000})
-            await page.evaluate('document.querySelector(".play-wrapper").click()')
-            await asyncio.sleep(30)
-            await page.waitForSelector("button[data-fullscreen]", {"timeout": 10000})
-            await page.click("button[data-fullscreen]")
-            await asyncio.sleep(3)
-            filename = f"{cam_name.replace(' ', '_').lower()}.png"
-            path = os.path.join(self.WEBCAM_OUTPUT_FOLDER, filename)
-            await page.screenshot({"path": path, "fullPage": True})
-            logging.info(f"Captura interactiva '{cam_name}' guardada.")
-            return (path, cam_name)
-        except Exception as e:
-            logging.error(
-                f"Error con la cámara interactiva '{cam_name}': {e}", exc_info=True
-            )
-            return None
-        finally:
-            if browser:
-                await browser.close()
+                await asyncio.sleep(30)
+
+                await page.wait_for_selector("button[data-fullscreen]", timeout=10000)
+                await page.click("button[data-fullscreen]")
+
+                await asyncio.sleep(3)
+
+                filename = f"{cam_name.replace(' ', '_').lower()}.png"
+                path = os.path.join(self.WEBCAM_OUTPUT_FOLDER, filename)
+                await page.screenshot(path=path, full_page=True)
+
+                logging.info(f"Captura interactiva '{cam_name}' guardada.")
+                return (path, cam_name)
+            except Exception as e:
+                logging.error(
+                    f"Error con la cámara interactiva '{cam_name}': {e}", exc_info=True
+                )
+                return None
+            finally:
+                if browser:
+                    await browser.close()
 
     async def get_all_webcam_images(self):
+        # Esta función no necesita cambios, ya llama al método nuevo
         logging.info("Iniciando descarga de imágenes de webcams.")
         image_data = []
         for camera in self.cam_config:
@@ -229,6 +237,62 @@ class BotController:
                 image_data.append(result)
             await asyncio.sleep(1)
         return image_data
+
+    # ... (El resto de las funciones como get_metar_reports, generate_and_send_satellite_videos, etc., no necesitan cambios urgentes)
+    # ... Para ser breve, las voy a omitir aquí, pero debes mantenerlas en tu archivo.
+    # ... La única otra función que cambiaría es generate_and_send_satellite_videos para usar Playwright también.
+
+    async def generate_and_send_satellite_videos(self, bot):
+        logging.info("Iniciando generación de videos satelitales con Playwright.")
+        async with async_playwright() as p:
+            browser = None
+            try:
+                browser = await p.chromium.connect(self.browserless_url)
+                context = await browser.new_context()
+                page = await context.new_page()
+
+                config = self.satellite_maps
+                for i, mapa in enumerate(config["maps"]):
+                    map_id, map_caption = mapa["id"], mapa["caption"]
+                    logging.info(
+                        f"Procesando Mapa Satelital {i + 1}/{len(config['maps'])}: {map_caption}"
+                    )
+
+                    await page.goto(
+                        config["start_url"], wait_until="load", timeout=90000
+                    )
+                    await page.click(f'a[href*="data_folder={map_id}"]')
+                    await page.wait_for_selector(
+                        "#downloadLoop", state="visible", timeout=90000
+                    )
+
+                    await asyncio.sleep(5)
+                    await page.evaluate(
+                        'document.querySelector("#downloadLoop").click()'
+                    )
+
+                    # Esperar por el GIF
+                    img_locator = page.locator("#animatedGifWrapper img")
+                    await img_locator.wait_for(state="visible", timeout=120000)
+                    data_url = await img_locator.get_attribute("src")
+
+                    _, encoded_data = data_url.split(",", 1)
+                    gif_path = os.path.join(self.SATELLITE_OUTPUT_FOLDER, "temp.gif")
+                    with open(gif_path, "wb") as f:
+                        f.write(base64.b64decode(encoded_data))
+
+                    mp4_path = os.path.join(self.SATELLITE_OUTPUT_FOLDER, "video.mp4")
+                    if self.convert_gif_to_mp4(gif_path, mp4_path):
+                        await self.send_video_to_telegram(bot, mp4_path, map_caption)
+                    else:
+                        logging.error(
+                            "Envío omitido por error en la conversión de GIF a MP4."
+                        )
+            except Exception as e:
+                logging.error(f"Error en el proceso satelital: {e}", exc_info=True)
+            finally:
+                if browser:
+                    await browser.close()
 
     def get_metar_reports(self):
         logging.info("Obteniendo reportes METAR.")
@@ -257,52 +321,6 @@ class BotController:
             logging.error(f"Error obteniendo datos METAR: {e}", exc_info=True)
             report_text += "No se pudieron obtener los datos meteorológicos."
         return report_text
-
-    async def generate_and_send_satellite_videos(self, bot):
-        logging.info("Iniciando generación de videos satelitales.")
-        browser = None
-        try:
-            browser = await connect(browserWSEndpoint=self.browserless_url)
-            page = await browser.newPage()
-            config = self.satellite_maps
-            for i, mapa in enumerate(config["maps"]):
-                map_id, map_caption = mapa["id"], mapa["caption"]
-                logging.info(
-                    f"Procesando Mapa Satelital {i + 1}/{len(config['maps'])}: {map_caption}"
-                )
-                await page.goto(
-                    config["start_url"], {"waitUntil": "networkidle2", "timeout": 90000}
-                )
-                await page.waitForSelector(f'a[href*="data_folder={map_id}"]')
-                await page.click(f'a[href*="data_folder={map_id}"]')
-                await page.waitForSelector(
-                    "#downloadLoop", {"visible": True, "timeout": 90000}
-                )
-                await asyncio.sleep(5)
-                await page.evaluate('document.querySelector("#downloadLoop").click()')
-                await page.waitForFunction(
-                    "() => { const img = document.querySelector('#animatedGifWrapper img'); return img && img.src.startsWith('data:image'); }",
-                    {"timeout": 120000},
-                )
-                data_url = await page.evaluate(
-                    "document.querySelector('#animatedGifWrapper img').src"
-                )
-                _, encoded_data = data_url.split(",", 1)
-                gif_path = os.path.join(self.SATELLITE_OUTPUT_FOLDER, "temp.gif")
-                with open(gif_path, "wb") as f:
-                    f.write(base64.b64decode(encoded_data))
-                mp4_path = os.path.join(self.SATELLITE_OUTPUT_FOLDER, "video.mp4")
-                if self.convert_gif_to_mp4(gif_path, mp4_path):
-                    await self.send_video_to_telegram(bot, mp4_path, map_caption)
-                else:
-                    logging.error(
-                        "Envío omitido por error en la conversión de GIF a MP4."
-                    )
-        except Exception as e:
-            logging.error(f"Error en el proceso satelital: {e}", exc_info=True)
-        finally:
-            if browser:
-                await browser.close()
 
     def convert_gif_to_mp4(self, gif_path, mp4_path):
         logging.info(f"Convirtiendo {os.path.basename(gif_path)} a MP4...")
