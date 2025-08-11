@@ -342,7 +342,12 @@ class BotController:
             if media_group:
                 for i in range(0, len(media_group), 10):
                     chunk = media_group[i : i + 10]
-                    await bot.send_media_group(chat_id=self.chat_id, media=chunk)
+                    await bot.send_media_group(
+                        chat_id=self.chat_id,
+                        media=chunk,
+                        read_timeout=60,
+                        write_timeout=60,
+                    )
                     logging.info(f"Grupo de {len(chunk)} imágenes enviado.")
                     await asyncio.sleep(1)
             else:
