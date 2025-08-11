@@ -28,9 +28,9 @@ class BotController:
         self.chat_id = os.environ.get("CHAT_ID")
         self.browserless_token = os.environ.get("BROWSERLESS_TOKEN")
 
-        # URL de conexión para Playwright en Browserless
+        # --- CAMBIO: Se usa la nueva URL de Browserless ---
         self.browserless_url = (
-            f"wss://chrome.browserless.io/playwright?token={self.browserless_token}"
+            f"wss://production-sfo.browserless.io?token={self.browserless_token}"
         )
 
         self.INTERACTIVE_CAM_TIMEOUT = 240  # 4 minutos de timeout
@@ -150,7 +150,6 @@ class BotController:
         }
 
     def get_static_webcam_image(self, camera_config):
-        # Esta función no cambia
         cam_name = camera_config["name"]
         try:
             logging.info(f"📡 Procesando cámara estática: {cam_name}")
@@ -182,7 +181,7 @@ class BotController:
         async with async_playwright() as p:
             browser = None
             try:
-                browser = await p.chromium.connect(self.browserless_url)
+                browser = await p.chromium.connect(self.browserless_url, timeout=60000)
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
                     viewport={"width": 1920, "height": 1080},
@@ -218,7 +217,6 @@ class BotController:
                     await browser.close()
 
     async def get_all_webcam_images(self):
-        # Esta función no necesita cambios, ya llama al método nuevo
         logging.info("Iniciando descarga de imágenes de webcams.")
         image_data = []
         for camera in self.cam_config:
@@ -238,16 +236,12 @@ class BotController:
             await asyncio.sleep(1)
         return image_data
 
-    # ... (El resto de las funciones como get_metar_reports, generate_and_send_satellite_videos, etc., no necesitan cambios urgentes)
-    # ... Para ser breve, las voy a omitir aquí, pero debes mantenerlas en tu archivo.
-    # ... La única otra función que cambiaría es generate_and_send_satellite_videos para usar Playwright también.
-
     async def generate_and_send_satellite_videos(self, bot):
         logging.info("Iniciando generación de videos satelitales con Playwright.")
         async with async_playwright() as p:
             browser = None
             try:
-                browser = await p.chromium.connect(self.browserless_url)
+                browser = await p.chromium.connect(self.browserless_url, timeout=60000)
                 context = await browser.new_context()
                 page = await context.new_page()
 
@@ -271,7 +265,6 @@ class BotController:
                         'document.querySelector("#downloadLoop").click()'
                     )
 
-                    # Esperar por el GIF
                     img_locator = page.locator("#animatedGifWrapper img")
                     await img_locator.wait_for(state="visible", timeout=120000)
                     data_url = await img_locator.get_attribute("src")
